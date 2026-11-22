@@ -109,3 +109,5 @@ tbody tr:hover, tbody tr.sel { background: color-mix(in srgb, var(--accent) 12%,
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 #sketch[hidden], #edgeCanvas[hidden] { display: none; }
+#secHoles[hidden], #secGeom[hidden] { display: none; }
+.calib[hidden] { display: none; }

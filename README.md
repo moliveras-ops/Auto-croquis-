@@ -1,6 +1,6 @@
 # Auto croquis
 
-Sube una imagen y obtén un croquis con su geometría detectada: líneas, polilíneas, círculos, arcos y rectángulos. Todo corre en el navegador; la imagen no sale de tu equipo.
+Sube una imagen y obtén un croquis con su geometría detectada. Dos modos: **Orificios y patrón** (por ejemplo, un espejo de tubos) y **Contornos** (líneas, círculos, arcos y rectángulos). Todo corre en el navegador; la imagen no sale de tu equipo.
 
 ## Uso
 
@@ -10,7 +10,13 @@ Sube una imagen y obtén un croquis con su geometría detectada: líneas, polil�
 4. Haz clic en una fila de la tabla para resaltar el elemento, o en × para quitarlo del croquis.
 5. **Exporta** a SVG, DXF (líneas, círculos y arcos en la capa `CROQUIS`), PNG o JSON.
 
-## Cómo funciona
+## Modo Orificios y patrón
+
+Detecta cada orificio como una mancha circular a varias escalas (diferencia de gaussianas), ajusta su radio por el gradiente radial, descarta los de tamaño atípico y los que no siguen el patrón. Estima el paso, el tipo de malla (triangular o cuadrada) y su giro, y numera cada orificio por fila y columna. Exporta a CSV, JSON, DXF y SVG.
+
+Si no detecta bien: ajusta el rango de Ø (en píxeles de la imagen de trabajo), la sensibilidad, o marca *Orificios claros* si se ven más claros que el fondo.
+
+## Cómo funciona el modo Contornos
 
 Escala de grises, suavizado gaussiano y bordes con Canny. Luego traza los bordes a polilíneas, une extremos cercanos, las simplifica (Douglas-Peucker) y clasifica cada una: círculo o arco por ajuste de mínimos cuadrados, rectángulo por ángulos rectos y el resto como líneas o polígonos. El código del análisis está en `core.js` y la interfaz en `app.js`.
 

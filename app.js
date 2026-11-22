@@ -12,14 +12,15 @@
   const FORMAT = {
     sens: (v) => v, sigma: (v) => (v / 10).toFixed(1), eps: (v) => (v / 10).toFixed(1),
     minLen: (v) => v, join: (v) => v, snap: (v) => v + '°', res: (v) => v + ' px',
-    bg: (v) => v + '%', lw: (v) => (v / 10).toFixed(1)
+    bg: (v) => v + '%', lw: (v) => (v / 10).toFixed(1),
+    dmin: (v) => v, dmax: (v) => v, hsens: (v) => v, tol: (v) => v + '%'
   };
   const COLORS = { line: '#1f4e8c', polyline: '#1f4e8c', polygon: '#1f4e8c', rect: '#0f766e', circle: '#c2410c', arc: '#a16207' };
   const TIPO = { line: 'Línea', polyline: 'Polilínea', polygon: 'Polígono', rect: 'Rectángulo', circle: 'Círculo', arc: 'Arco' };
 
   const S = {
     img: null, W: 0, H: 0, gray: null, bgUrl: '', edge: null, shapes: [], hidden: new Set(),
-    unit: 'px', scale: 1, calibrated: false, calib: false, calibPts: [], sel: -1, view: 'sketch', timer: 0, name: 'croquis'
+    unit: 'px', scale: 1, calibrated: false, mode: 'holes', stats: null, calib: false, calibPts: [], sel: -1, view: 'sketch', timer: 0, name: 'croquis'
   };
 
   /* ---------- Controles ---------- */
@@ -71,7 +72,12 @@
     status('Analizando…');
     setTimeout(() => {
       const t = performance.now();
-      const r = Croquis.analyze(S.gray, S.W, S.H, opts());
+      let r;
+      if (S.mode === 'holes') {
+        r = Croquis.holes(S.gray, S.W, S.H, { dmin: +$('#dmin').value, dmax: +$('#dmax').value, sens: +$('#hsens').value, tol: +$('#tol').value / 100, dark: !$('#light').checked, lattice: $('#lattice').checked });
+        r.edge = null;
+      } else r = Croquis.analyze(S.gray, S.W, S.H, opts());
+      S.stats = r.stats || null;
       S.edge = r.edge; S.shapes = r.shapes; S.sel = -1;
       status(S.W + '×' + S.H + ' px · ' + Math.round(performance.now() - t) + ' ms');
       render();
@@ -104,7 +110,7 @@
         const [a, b, c] = s.pts;
         return { m: fmt(Math.hypot(b[0] - a[0], b[1] - a[1])) + ' × ' + fmt(Math.hypot(c[0] - b[0], c[1] - b[1])), d: 'ángulo ' + angleOf(a, b).toFixed(1) + '°' };
       }
-      case 'circle': return { m: 'Ø ' + fmt(2 * s.r), d: 'centro ' + (s.cx * k).toFixed(1) + ', ' + ((S.H - s.cy) * k).toFixed(1) };
+      case 'circle': return { m: 'Ø ' + fmt(2 * s.r), d: (s.row ? 'F' + s.row + ' C' + s.col + ' · ' : '') + 'centro ' + (s.cx * k).toFixed(1) + ', ' + ((S.H - s.cy) * k).toFixed(1) };
       default: return { m: 'R ' + fmt(s.r), d: 'arco ' + Math.abs(s.span * 180 / Math.PI).toFixed(0) + '°' };
     }
   }
@@ -122,6 +128,7 @@
   }
   function labelsOf(s, fs) {
     const out = [], t = (x, y, txt, an) => out.push(`<text x="${esc(x)}" y="${esc(y)}" font-size="${esc(fs)}" text-anchor="${an || 'middle'}">${txt}</text>`);
+    if (S.mode === 'holes') { if (vis().length <= 400) t(s.cx, s.cy + s.r * 0.35, s.id + 1); return out.join(''); }
     if (s.type === 'circle') {
       if (s.r > fs * 4) t(s.cx, s.cy - s.r + fs * 1.7, 'Ø ' + fmt(2 * s.r));
       else t(s.cx + s.r + fs * 0.5, s.cy + fs / 3, 'Ø ' + fmt(2 * s.r), 'start');
@@ -176,21 +183,27 @@
     $('#sketch').innerHTML = buildSVG();
     drawEdges();
     const v = vis(), cnt = (t) => v.filter((s) => t.includes(s.type)).length;
-    $('#summary').innerHTML = [
-      ['Líneas', cnt(['line', 'polyline'])], ['Círculos', cnt(['circle'])], ['Arcos', cnt(['arc'])],
-      ['Rectángulos', cnt(['rect'])], ['Polígonos', cnt(['polygon'])]
-    ].map(([n, c]) => `<span class="pill">${n} <b>${c}</b></span>`).join('');
-    $('#tbl tbody').innerHTML = v.map((s) => {
+    let pills;
+    if (S.mode === 'holes') {
+      const st = S.stats || {};
+      pills = [['Orificios', v.length]];
+      if (st.diam) pills.push(['Ø mediano', fmt(st.diam)]);
+      if (st.pitch) pills.push(['Paso', fmt(st.pitch)], ['Patrón', st.hex ? 'triangular' : 'cuadrado'], ['Filas', st.rows], ['Giro', st.angle.toFixed(1) + '°']);
+    } else pills = [['Líneas', cnt(['line', 'polyline'])], ['Círculos', cnt(['circle'])], ['Arcos', cnt(['arc'])], ['Rectángulos', cnt(['rect'])], ['Polígonos', cnt(['polygon'])]];
+    $('#summary').innerHTML = pills.map(([n, c]) => `<span class="pill">${n} <b>${c}</b></span>`).join('');
+    const MAXROWS = 400;
+    $('#tbl tbody').innerHTML = v.slice(0, MAXROWS).map((s) => {
       const d = describe(s);
       return `<tr data-i="${s.id}" class="${s.id === S.sel ? 'sel' : ''}"><td class="num">${s.id + 1}</td><td>${TIPO[s.type]}</td><td class="mono">${d.m}</td><td class="mono">${d.d}</td><td><button class="del" data-del="${s.id}" aria-label="Quitar elemento ${s.id + 1}">×</button></td></tr>`;
-    }).join('') || '<tr><td colspan="5">No se detectó geometría. Sube la sensibilidad o baja el largo mínimo.</td></tr>';
+    }).join('') + (v.length > MAXROWS ? `<tr><td colspan="5">Se muestran ${MAXROWS} de ${v.length}. El resto va en el JSON y el CSV.</td></tr>` : '') ||
+      '<tr><td colspan="5">No se detectó nada. Sube la sensibilidad o ajusta el rango de Ø.</td></tr>';
   }
 
   function drawEdges() {
     const c = $('#edgeCanvas'); c.width = S.W; c.height = S.H;
     const x = c.getContext('2d'), im = x.createImageData(S.W, S.H);
-    for (let i = 0; i < S.edge.length; i++) {
-      const v = S.edge[i] ? 20 : 255;
+    for (let i = 0; i < S.gray.length; i++) {
+      const v = S.edge ? (S.edge[i] ? 20 : 255) : S.gray[i];
       im.data[i * 4] = im.data[i * 4 + 1] = im.data[i * 4 + 2] = v; im.data[i * 4 + 3] = 255;
     }
     x.putImageData(im, 0, 0);
@@ -236,11 +249,18 @@
       origen: S.name, ancho_px: S.W, alto_px: S.H, unidad: S.calibrated ? S.unit : 'px', escala_por_px: S.calibrated ? S.scale : 1,
       elementos: vis().map((s) => {
         const d = describe(s), r = { id: s.id + 1, tipo: s.type, medida: d.m, detalle: d.d };
+        if (s.row) { r.fila = s.row; r.columna = s.col; }
         if (s.pts) r.puntos_px = s.pts.map((p) => p.map((v) => Math.round(v * 10) / 10));
         else Object.assign(r, { cx_px: +s.cx.toFixed(1), cy_px: +s.cy.toFixed(1), radio_px: +s.r.toFixed(1) });
         return r;
       })
     }, null, 2);
+  }
+  function toCSV() {
+    const k = S.calibrated ? S.scale : 1, u = S.calibrated ? S.unit : 'px';
+    const rows = ['n;fila;columna;x_' + u + ';y_' + u + ';diametro_' + u];
+    vis().filter((s) => s.type === 'circle').forEach((s, i) => rows.push([i + 1, s.row || '', s.col || '', (s.cx * k).toFixed(2), (s.cy * k).toFixed(2), (2 * s.r * k).toFixed(2)].join(';')));
+    return '\ufeff' + rows.join('\n');
   }
   function save(name, data, type) {
     const url = URL.createObjectURL(new Blob([data], { type }));
@@ -252,6 +272,7 @@
     const base = S.name + '-croquis';
     if (kind === 'svg') save(base + '.svg', buildSVG({ clean: true, white: true, bg: $('#bg').value > 0 }), 'image/svg+xml');
     else if (kind === 'dxf') save(base + '.dxf', toDXF(), 'application/dxf');
+    else if (kind === 'csv') save(base + '.csv', toCSV(), 'text/csv;charset=utf-8');
     else if (kind === 'json') save(base + '.json', toJSON(), 'application/json');
     else {
       const svg = buildSVG({ clean: true, white: true }), im = new Image();
@@ -264,7 +285,23 @@
     }
   }
 
-  /* ---------- Imagen de ejemplo ---------- */
+  /* ---------- Imágenes de ejemplo ---------- */
+
+  function sampleHoles() {
+    const c = document.createElement('canvas'); c.width = 900; c.height = 620;
+    const x = c.getContext('2d');
+    const gr = x.createLinearGradient(0, 0, 900, 620); gr.addColorStop(0, '#9a7a5c'); gr.addColorStop(1, '#6f6a62');
+    x.fillStyle = gr; x.fillRect(0, 0, 900, 620);
+    const p = 26, ang = 7 * Math.PI / 180;
+    for (let r = 0; r < 20; r++) for (let q = 0; q < 28; q++) {
+      const u = q * p + (r % 2 ? p / 2 : 0), v = r * p * 0.866;
+      const X = 150 + u * Math.cos(ang) - v * Math.sin(ang), Y = 70 + u * Math.sin(ang) + v * Math.cos(ang);
+      if (Math.hypot(X - 450, Y - 310) > 270) continue;
+      x.fillStyle = '#3a2f28'; x.beginPath(); x.arc(X, Y, 8, 0, 7); x.fill();
+    }
+    return c.toDataURL('image/png');
+  }
+
 
   function sample() {
     const c = document.createElement('canvas'); c.width = 900; c.height = 620;
@@ -279,9 +316,21 @@
     return c.toDataURL('image/png');
   }
 
+  function setMode(m) {
+    S.mode = m; S.hidden.clear();
+    document.querySelectorAll('#modes .chip').forEach((c) => c.classList.toggle('on', c.dataset.mode === m));
+    $('#secHoles').hidden = m !== 'holes'; $('#secGeom').hidden = m !== 'geom';
+    if (m === 'holes') { $('#bg').value = 45; $('#lw').value = 12; $('#labels').checked = false; $('#colors').checked = false; }
+    else { $('#bg').value = 25; $('#lw').value = 20; $('#labels').checked = true; $('#colors').checked = true; }
+    syncOutputs(); if (S.gray) analyze();
+  }
+
   /* ---------- Eventos ---------- */
 
   function bind() {
+    ['dmin', 'dmax', 'hsens', 'tol'].forEach((k) => $('#' + k).addEventListener('input', () => { syncOutputs(); schedule(false); }));
+    ['light', 'lattice'].forEach((k) => $('#' + k).addEventListener('change', () => schedule(false)));
+    document.querySelectorAll('#modes .chip').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
     sliders.forEach((k) => $('#' + k).addEventListener('input', () => { syncOutputs(); if (k === 'bg' || k === 'lw') render(); else schedule(k === 'res'); }));
     ['circles', 'rects'].forEach((k) => $('#' + k).addEventListener('change', () => schedule(false)));
     ['labels', 'colors'].forEach((k) => $('#' + k).addEventListener('change', render));
@@ -289,7 +338,7 @@
     const render_if = () => { if (S.gray) render(); };
 
     $('#file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadSrc(URL.createObjectURL(f), f.name); });
-    $('#btnSample').addEventListener('click', () => loadSrc(sample(), 'ejemplo'));
+    $('#btnSample').addEventListener('click', () => loadSrc(S.mode === 'holes' ? sampleHoles() : sample(), 'ejemplo'));
 
     const wrap = $('#wrap');
     ['dragenter', 'dragover'].forEach((t) => wrap.addEventListener(t, (e) => { e.preventDefault(); wrap.classList.add('drag'); }));
@@ -346,8 +395,9 @@
   }
 
   setPreset('inspeccion');
-  $('#res').value = 900; syncOutputs();
-  $('#bg').value = 25; $('#lw').value = 20; syncOutputs();
+  $('#res').value = 1200; $('#dmin').value = 6; $('#dmax').value = 40; $('#hsens').value = 60; $('#tol').value = 35;
+  syncOutputs();
   bind();
-  loadSrc(sample(), 'ejemplo');
+  setMode('holes');
+  loadSrc(sampleHoles(), 'ejemplo-orificios');
 })();

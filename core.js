@@ -371,7 +371,206 @@
     return { edge, shapes };
   }
 
-  const api = { analyze, canny, trace, classify, fitCircle, simplify, pathLen };
+
+  /* ---------- Modo orificios y patrón ---------- */
+
+  function boxesForGauss(sigma, n) {
+    const wi = Math.sqrt(12 * sigma * sigma / n + 1);
+    let wl = Math.floor(wi); if (wl % 2 === 0) wl--;
+    const wu = wl + 2;
+    const m = Math.round((12 * sigma * sigma - n * wl * wl - 4 * n * wl - 3 * n) / (-4 * wl - 4));
+    const out = []; for (let i = 0; i < n; i++) out.push(i < m ? wl : wu);
+    return out;
+  }
+  function boxH(src, dst, W, H, r) {
+    const k = 1 / (r + r + 1);
+    for (let y = 0; y < H; y++) {
+      let ti = y * W, li = ti, ri = ti + r;
+      const fv = src[ti], lv = src[ti + W - 1];
+      let val = (r + 1) * fv;
+      for (let j = 0; j < r; j++) val += src[ti + j];
+      for (let j = 0; j <= r; j++) { val += src[ri++] - fv; dst[ti++] = val * k; }
+      for (let j = r + 1; j < W - r; j++) { val += src[ri++] - src[li++]; dst[ti++] = val * k; }
+      for (let j = W - r; j < W; j++) { val += lv - src[li++]; dst[ti++] = val * k; }
+    }
+  }
+  function boxV(src, dst, W, H, r) {
+    const k = 1 / (r + r + 1);
+    for (let x = 0; x < W; x++) {
+      let ti = x, li = x, ri = x + r * W;
+      const fv = src[ti], lv = src[ti + (H - 1) * W];
+      let val = (r + 1) * fv;
+      for (let j = 0; j < r; j++) val += src[ti + j * W];
+      for (let j = 0; j <= r; j++) { val += src[ri] - fv; dst[ti] = val * k; ri += W; ti += W; }
+      for (let j = r + 1; j < H - r; j++) { val += src[ri] - src[li]; dst[ti] = val * k; li += W; ri += W; ti += W; }
+      for (let j = H - r; j < H; j++) { val += lv - src[li]; dst[ti] = val * k; li += W; ti += W; }
+    }
+  }
+  function gaussFast(src, W, H, sigma) {
+    if (sigma < 0.5) return Float32Array.from(src);
+    const a = Float32Array.from(src), b = new Float32Array(W * H);
+    const lim = (Math.min(W, H) >> 1) - 1;
+    for (const w of boxesForGauss(sigma, 3)) {
+      const r = Math.max(1, Math.min(((w - 1) / 2) | 0, lim));
+      boxH(a, b, W, H, r); boxV(b, a, W, H, r);
+    }
+    return a;
+  }
+
+  function median(a) { const b = a.slice().sort((x, y) => x - y); return b.length ? b[b.length >> 1] : 0; }
+
+  function holes(gray, W, H, o) {
+    const rmin = Math.max(1.5, o.dmin / 2), rmax = Math.max(rmin + 1, o.dmax / 2);
+    const bg = gaussFast(gray, W, H, Math.max(rmax * 3, 8));
+    const base = new Float32Array(W * H);
+    for (let i = 0; i < base.length; i++) base[i] = gray[i] - bg[i];
+
+    const ratio = 1.25, rs = [];
+    for (let r = rmin; r <= rmax; r *= ratio) rs.push(r);
+    const sig = rs.map((r) => r / Math.SQRT2); sig.push(sig[sig.length - 1] * ratio);
+    const B = sig.map((sg) => gaussFast(base, W, H, sg));
+    const sgn = o.dark ? 1 : -1, n = rs.length, D = [];
+    for (let s = 0; s < n; s++) {
+      const d = new Float32Array(W * H);
+      for (let i = 0; i < d.length; i++) d[i] = sgn * (B[s + 1][i] - B[s][i]);
+      D.push(d);
+    }
+
+    const floor = 2.5, cands = [], rf = Math.sqrt(ratio);
+    for (let s = 0; s < n; s++) {
+      const d = D[s], dp = s > 0 ? D[s - 1] : null, dn = s < n - 1 ? D[s + 1] : null;
+      for (let y = 1; y < H - 1; y++) {
+        for (let x = 1; x < W - 1; x++) {
+          const i = y * W + x, v = d[i];
+          if (v < floor) continue;
+          if (v < d[i - 1] || v <= d[i + 1] || v < d[i - W] || v <= d[i + W] ||
+              v < d[i - W - 1] || v <= d[i - W + 1] || v < d[i + W - 1] || v <= d[i + W + 1]) continue;
+          let ok = true;
+          for (const q of [dp, dn]) {
+            if (!q || !ok) continue;
+            for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (q[i + dy * W + dx] >= v) { ok = false; break; }
+          }
+          if (ok) cands.push({ x, y, r: rs[s] * rf, v });
+        }
+      }
+    }
+    if (!cands.length) return { shapes: [], stats: {} };
+
+    const vs = cands.map((c) => c.v).sort((a, b) => a - b);
+    const thr = vs[Math.floor(vs.length * 0.85)] * (0.9 - 0.008 * o.sens);
+    let pick = cands.filter((c) => c.v >= thr).sort((a, b) => b.v - a.v);
+
+    // supresión de solapes
+    const cs = rmax * 2.4, grid = new Map(), kept = [];
+    for (const c of pick) {
+      const gx = (c.x / cs) | 0, gy = (c.y / cs) | 0;
+      let clash = false;
+      for (let dy = -1; dy <= 1 && !clash; dy++) for (let dx = -1; dx <= 1 && !clash; dx++) {
+        const l = grid.get((gx + dx) + ',' + (gy + dy));
+        if (l) for (const k of l) if (Math.hypot(k.x - c.x, k.y - c.y) < 0.9 * Math.max(k.r, c.r)) { clash = true; break; }
+      }
+      if (clash) continue;
+      const key = gx + ',' + gy; if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(c); kept.push(c);
+    }
+
+    // radio real por gradiente radial
+    const gs = gaussFast(gray, W, H, 1);
+    for (const h of kept) {
+      const ring = (r) => {
+        let sum = 0, cnt = 0;
+        for (let k = 0; k < 16; k++) {
+          const a = k * PI / 8, x = Math.round(h.x + r * Math.cos(a)), y = Math.round(h.y + r * Math.sin(a));
+          if (x >= 0 && y >= 0 && x < W && y < H) { sum += gs[y * W + x]; cnt++; }
+        }
+        return cnt >= 10 ? sum / cnt : null;
+      };
+      let best = 2, br = h.r;
+      for (let r = h.r * 0.6; r <= h.r * 1.5; r += 0.5) {
+        const a = ring(r - 1), b = ring(r + 1);
+        if (a == null || b == null) continue;
+        const g = o.dark ? b - a : a - b;
+        if (g > best) { best = g; br = r; }
+      }
+      h.r = br;
+    }
+
+    // tamaño dominante
+    const bins = new Map();
+    for (const h of kept) { const b = Math.round(h.r * 2); bins.set(b, (bins.get(b) || 0) + h.v); }
+    let mb = 0, mv = -1;
+    for (const [b] of bins) {
+      const v = (bins.get(b - 1) || 0) + bins.get(b) + (bins.get(b + 1) || 0);
+      if (v > mv) { mv = v; mb = b; }
+    }
+    const modeR = mb / 2;
+    let hs = kept.filter((h) => Math.abs(h.r - modeR) <= o.tol * modeR);
+    if (hs.length < 4) return finish(hs, null, 0, 0);
+
+    // paso del patrón
+    const cell = modeR * 8, g2 = new Map();
+    hs.forEach((h, i) => { const k = ((h.x / cell) | 0) + ',' + ((h.y / cell) | 0); if (!g2.has(k)) g2.set(k, []); g2.get(k).push(i); });
+    const near = (i, lo, hi) => {
+      const h = hs[i], gx = (h.x / cell) | 0, gy = (h.y / cell) | 0, out = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const l = g2.get((gx + dx) + ',' + (gy + dy));
+        if (l) for (const j of l) if (j !== i) { const d = Math.hypot(hs[j].x - h.x, hs[j].y - h.y); if (d >= lo && d <= hi) out.push([j, d]); }
+      }
+      return out;
+    };
+    const nnd = [];
+    for (let i = 0; i < hs.length; i++) {
+      const l = near(i, 0, cell); if (l.length) nnd.push(Math.min(...l.map((p) => p[1])));
+    }
+    if (nnd.length < 4) return finish(hs, null, 0, 0);
+    const hb = new Map();
+    nnd.forEach((d) => { const b = Math.round(d * 2); hb.set(b, (hb.get(b) || 0) + 1); });
+    let pb = 0, pv = -1;
+    for (const [b] of hb) { const v = (hb.get(b - 1) || 0) + hb.get(b) + (hb.get(b + 1) || 0); if (v > pv) { pv = v; pb = b; } }
+    const near0 = nnd.filter((d) => Math.abs(d - pb / 2) <= 0.15 * pb / 2);
+    const pitch = near0.reduce((a, b) => a + b, 0) / near0.length;
+
+    let alive = hs.map((_, i) => i), nbr = null;
+    for (let it = 0; it < 3; it++) {
+      const idx = new Map(); alive.forEach((a, k) => idx.set(a, k));
+      nbr = alive.map((a) => near(a, 0.8 * pitch, 1.25 * pitch).filter((p) => idx.has(p[0])).map((p) => p[0]));
+      if (!o.lattice) break;
+      const next = alive.filter((_, k) => nbr[k].length >= 2);
+      if (next.length === alive.length) break;
+      alive = next;
+    }
+    const idx2 = new Map(); alive.forEach((a, k) => idx2.set(a, k));
+    nbr = alive.map((a) => near(a, 0.8 * pitch, 1.25 * pitch).filter((p) => idx2.has(p[0])).map((p) => p[0]));
+    const counts = nbr.map((l) => l.length).sort((a, b) => a - b);
+    const hex = (counts[Math.floor(counts.length * 0.75)] || 0) >= 5, m = hex ? 6 : 4;
+    let S = 0, C = 0;
+    alive.forEach((a, k) => nbr[k].forEach((j) => {
+      const th = Math.atan2(hs[j].y - hs[a].y, hs[j].x - hs[a].x); S += Math.sin(m * th); C += Math.cos(m * th);
+    }));
+    let th0 = Math.atan2(S, C) / m;
+    const half = PI / m; while (th0 > half) th0 -= 2 * half; while (th0 <= -half) th0 += 2 * half;
+    return finish(alive.map((a) => hs[a]), { hex, th0, pitch }, pitch, th0);
+
+    function finish(list, pat, pitchV, th) {
+      const shapes = list.map((h) => ({ type: 'circle', cx: h.x, cy: h.y, r: h.r, length: 2 * PI * h.r, row: 0, col: 0 }));
+      let rows = 0;
+      if (pat && shapes.length) {
+        const rowSp = pat.hex ? pitchV * Math.sin(PI / 3) : pitchV, c = Math.cos(th), sn = Math.sin(th);
+        shapes.forEach((s) => { s.v = -s.cx * sn + s.cy * c; s.u = s.cx * c + s.cy * sn; });
+        shapes.sort((a, b) => a.v - b.v);
+        let row = 1, prev = shapes[0].v, cur = [];
+        const flush = () => { cur.sort((a, b) => a.u - b.u).forEach((s, k) => { s.row = row; s.col = k + 1; }); cur = []; };
+        for (const s of shapes) { if (s.v - prev > rowSp * 0.5) { flush(); row++; } cur.push(s); prev = s.v; }
+        flush(); rows = row;
+        shapes.sort((a, b) => a.row - b.row || a.col - b.col);
+      }
+      shapes.forEach((s, i) => { s.id = i; delete s.u; delete s.v; });
+      const stats = { count: shapes.length, diam: 2 * median(shapes.map((s) => s.r)), pitch: pitchV, rows, hex: pat ? pat.hex : null, angle: pat ? th * 180 / PI : 0 };
+      return { shapes, stats };
+    }
+  }
+
+  const api = { holes, analyze, canny, trace, classify, fitCircle, simplify, pathLen };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Croquis = api;
 })(typeof self !== 'undefined' ? self : this);
