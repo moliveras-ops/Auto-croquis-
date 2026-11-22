@@ -111,3 +111,29 @@ tbody tr:hover, tbody tr.sel { background: color-mix(in srgb, var(--accent) 12%,
 #sketch[hidden], #edgeCanvas[hidden] { display: none; }
 #secHoles[hidden], #secGeom[hidden] { display: none; }
 .calib[hidden] { display: none; }
+
+/* --- v3: barra de herramientas, zoom y móvil --- */
+.layout { grid-template-columns: minmax(0, 1fr) 300px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); padding: 7px 12px; font: 500 13px var(--font); cursor: pointer; min-height: 34px; }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: var(--ink); color: var(--bg); }
+.seg .icon { min-width: 36px; font-size: 16px; padding: 4px 10px; color: var(--ink); }
+.btn.sm { min-height: 34px; padding: 6px 12px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.canvasWrap { border-radius: 8px; }
+#sketch { width: 100%; display: grid; place-items: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+#sketch svg { max-height: 72vh; }
+#wrap.picking #sketch, #wrap.tool-add #sketch, #wrap.tool-del #sketch { cursor: crosshair; }
+#wrap.tool-move #sketch { cursor: grab; }
+.inline { margin-top: 10px; }
+.inline input { flex: 1; min-width: 0; }
+.scale + .scale { margin-top: 8px; }
+.pill.warn b { color: #b91c1c; }
+tr.miss td:nth-child(2) { color: #b91c1c; font-weight: 500; }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  #sketch svg { max-height: 62vh; }
+  .status { width: 100%; margin-left: 0; }
+}

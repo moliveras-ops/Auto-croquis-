@@ -13,7 +13,7 @@
 <header class="top">
   <div>
     <h1>Auto croquis</h1>
-    <p class="sub">Sube una imagen y obtén un croquis: cada orificio del patrón con su diámetro, fila y columna, o los contornos de la pieza.</p>
+    <p class="sub">Sube una foto y obtén el croquis: cada orificio del patrón con su diámetro, fila y columna, y las posiciones faltantes. También detecta contornos de piezas.</p>
   </div>
   <div class="actions">
     <label class="btn primary" for="file">Subir imagen</label>
@@ -23,118 +23,23 @@
 </header>
 
 <main class="layout">
-  <aside class="panel" aria-label="Ajustes">
-    <section>
-      <h2>Modo</h2>
-      <div class="chips" id="modes" role="group" aria-label="Modo de análisis">
-        <button type="button" class="chip on" data-mode="holes">Orificios y patrón</button>
-        <button type="button" class="chip" data-mode="geom">Contornos</button>
-      </div>
-    </section>
-
-    <div id="secHoles">
-    <section>
-      <h2>Orificios</h2>
-      <label class="row" for="dmin"><span>Ø mínimo (px)</span><output id="o-dmin"></output></label>
-      <input id="dmin" type="range" min="3" max="60">
-      <label class="row" for="dmax"><span>Ø máximo (px)</span><output id="o-dmax"></output></label>
-      <input id="dmax" type="range" min="8" max="160">
-      <label class="row" for="hsens"><span>Sensibilidad</span><output id="o-hsens"></output></label>
-      <input id="hsens" type="range" min="1" max="100">
-      <label class="row" for="tol"><span>Tolerancia de tamaño</span><output id="o-tol"></output></label>
-      <input id="tol" type="range" min="10" max="80">
-      <div class="checks">
-        <label><input type="checkbox" id="light"> Orificios claros sobre fondo oscuro</label>
-        <label><input type="checkbox" id="lattice" checked> Solo los que siguen el patrón</label>
-      </div>
-    </section>
-    </div>
-
-    <div id="secGeom" hidden>
-    <section>
-      <h2>Perfil</h2>
-      <div class="chips" id="presets" role="group" aria-label="Perfiles de ajuste">
-        <button type="button" class="chip on" data-p="inspeccion">Inspección</button>
-        <button type="button" class="chip" data-p="plano">Plano técnico</button>
-        <button type="button" class="chip" data-p="silueta">Silueta</button>
-        <button type="button" class="chip" data-p="detalle">Detallado</button>
-      </div>
-    </section>
-
-    <section>
-      <h2>Detección</h2>
-      <label class="row" for="sens"><span>Sensibilidad</span><output id="o-sens"></output></label>
-      <input id="sens" type="range" min="1" max="100">
-      <label class="row" for="sigma"><span>Suavizado</span><output id="o-sigma"></output></label>
-      <input id="sigma" type="range" min="0" max="50">
-      <label class="row" for="eps"><span>Simplificación (px)</span><output id="o-eps"></output></label>
-      <input id="eps" type="range" min="5" max="120">
-      <label class="row" for="minLen"><span>Largo mínimo (px)</span><output id="o-minLen"></output></label>
-      <input id="minLen" type="range" min="4" max="200">
-      <label class="row" for="join"><span>Unir extremos (px)</span><output id="o-join"></output></label>
-      <input id="join" type="range" min="0" max="30">
-      <label class="row" for="snap"><span>Ajuste a H/V (°)</span><output id="o-snap"></output></label>
-      <input id="snap" type="range" min="0" max="15">
-      <label class="row" for="res"><span>Resolución de trabajo</span><output id="o-res"></output></label>
-      <input id="res" type="range" min="400" max="1600" step="100">
-      <div class="checks">
-        <label><input type="checkbox" id="circles" checked> Detectar círculos y arcos</label>
-        <label><input type="checkbox" id="rects" checked> Detectar rectángulos</label>
-      </div>
-    </section>
-    </div>
-
-    <section>
-      <h2>Vista</h2>
-      <label class="row" for="bg"><span>Imagen de fondo</span><output id="o-bg"></output></label>
-      <input id="bg" type="range" min="0" max="100">
-      <label class="row" for="lw"><span>Grosor de línea</span><output id="o-lw"></output></label>
-      <input id="lw" type="range" min="5" max="60">
-      <div class="checks">
-        <label><input type="checkbox" id="labels"> Mostrar medidas / números</label>
-        <label><input type="checkbox" id="colors" checked> Color por tipo</label>
-      </div>
-    </section>
-
-    <section>
-      <h2>Escala</h2>
-      <div class="scale">
-        <label for="unit">Unidad</label>
-        <select id="unit">
-          <option value="px">px</option>
-          <option value="mm">mm</option>
-          <option value="cm">cm</option>
-          <option value="m">m</option>
-        </select>
-      </div>
-      <p class="hint" id="scaleInfo">Sin calibrar: las medidas están en píxeles.</p>
-      <button class="btn block" type="button" id="btnCalib">Calibrar con 2 puntos</button>
-      <div class="calib" id="calibForm" hidden>
-        <label for="calibVal">Distancia real entre los puntos</label>
-        <div class="inline">
-          <input id="calibVal" type="number" min="0" step="any" inputmode="decimal" placeholder="0">
-          <span id="calibUnit">mm</span>
-          <button class="btn primary" type="button" id="btnApplyCalib">Aplicar</button>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <h2>Exportar</h2>
-      <div class="grid2">
-        <button class="btn" type="button" data-exp="svg">SVG</button>
-        <button class="btn" type="button" data-exp="dxf">DXF</button>
-        <button class="btn" type="button" data-exp="png">PNG</button>
-        <button class="btn" type="button" data-exp="json">JSON</button>
-        <button class="btn" type="button" data-exp="csv">CSV</button>
-      </div>
-    </section>
-  </aside>
-
   <section class="stage">
-    <div class="tabs" role="tablist">
-      <button role="tab" class="tab on" data-view="sketch" aria-selected="true">Croquis</button>
-      <button role="tab" class="tab" data-view="edges" aria-selected="false">Bordes</button>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Vista">
+        <button type="button" class="tab on" data-view="sketch">Croquis</button>
+        <button type="button" class="tab" data-view="edges">Imagen</button>
+      </div>
+      <div class="seg" role="group" aria-label="Herramienta">
+        <button type="button" class="tool on" data-tool="move" title="Mover, seleccionar y hacer zoom">Mover</button>
+        <button type="button" class="tool" data-tool="add" title="Tocar para agregar un orificio">+ Orificio</button>
+        <button type="button" class="tool" data-tool="del" title="Tocar para quitar">Quitar</button>
+      </div>
+      <div class="seg" role="group" aria-label="Zoom">
+        <button type="button" class="icon" id="zOut" aria-label="Alejar">−</button>
+        <button type="button" class="icon" id="zFit" aria-label="Ver todo">⤢</button>
+        <button type="button" class="icon" id="zIn" aria-label="Acercar">+</button>
+      </div>
+      <button type="button" class="btn sm" id="btnUndo" disabled>Deshacer</button>
       <span class="status" id="status" role="status"></span>
     </div>
     <div class="canvasWrap" id="wrap">
@@ -149,6 +54,128 @@
       </table>
     </div>
   </section>
+
+  <aside class="panel" aria-label="Ajustes">
+    <section>
+      <h2>Modo</h2>
+      <div class="chips" id="modes" role="group" aria-label="Modo de análisis">
+        <button type="button" class="chip on" data-mode="holes">Orificios y patrón</button>
+        <button type="button" class="chip" data-mode="geom">Contornos</button>
+      </div>
+    </section>
+
+    <div id="secHoles">
+      <section>
+        <h2>Orificios</h2>
+        <button class="btn block" type="button" id="btnAuto">Detectar Ø automáticamente</button>
+        <label class="row" for="dmin"><span>Ø mínimo (px)</span><output id="o-dmin"></output></label>
+        <input id="dmin" type="range" min="3" max="80">
+        <label class="row" for="dmax"><span>Ø máximo (px)</span><output id="o-dmax"></output></label>
+        <input id="dmax" type="range" min="8" max="200">
+        <label class="row" for="hsens"><span>Sensibilidad</span><output id="o-hsens"></output></label>
+        <input id="hsens" type="range" min="1" max="100">
+        <label class="row" for="tol"><span>Tolerancia de tamaño</span><output id="o-tol"></output></label>
+        <input id="tol" type="range" min="10" max="80">
+        <div class="checks">
+          <label><input type="checkbox" id="light"> Orificios claros sobre fondo oscuro</label>
+          <label><input type="checkbox" id="lattice" checked> Solo los que siguen el patrón</label>
+          <label><input type="checkbox" id="showMissing" checked> Marcar posiciones faltantes</label>
+        </div>
+      </section>
+      <section>
+        <h2>Zona de análisis</h2>
+        <p class="hint">Encierra el espejo para ignorar textos, bordes y fondo.</p>
+        <div class="grid2">
+          <button class="btn" type="button" id="btnRoi">Dibujar zona</button>
+          <button class="btn" type="button" id="btnRoiClear" disabled>Quitar zona</button>
+        </div>
+        <div class="checks"><label><input type="checkbox" id="roiEllipse" checked> Zona elíptica (espejo circular)</label></div>
+      </section>
+    </div>
+
+    <div id="secGeom" hidden>
+      <section>
+        <h2>Perfil</h2>
+        <div class="chips" id="presets" role="group" aria-label="Perfiles de ajuste">
+          <button type="button" class="chip on" data-p="inspeccion">Inspección</button>
+          <button type="button" class="chip" data-p="plano">Plano técnico</button>
+          <button type="button" class="chip" data-p="silueta">Silueta</button>
+          <button type="button" class="chip" data-p="detalle">Detallado</button>
+        </div>
+      </section>
+      <section>
+        <h2>Detección</h2>
+        <label class="row" for="sens"><span>Sensibilidad</span><output id="o-sens"></output></label>
+        <input id="sens" type="range" min="1" max="100">
+        <label class="row" for="sigma"><span>Suavizado</span><output id="o-sigma"></output></label>
+        <input id="sigma" type="range" min="0" max="50">
+        <label class="row" for="eps"><span>Simplificación (px)</span><output id="o-eps"></output></label>
+        <input id="eps" type="range" min="5" max="120">
+        <label class="row" for="minLen"><span>Largo mínimo (px)</span><output id="o-minLen"></output></label>
+        <input id="minLen" type="range" min="4" max="200">
+        <label class="row" for="join"><span>Unir extremos (px)</span><output id="o-join"></output></label>
+        <input id="join" type="range" min="0" max="30">
+        <label class="row" for="snap"><span>Ajuste a H/V (°)</span><output id="o-snap"></output></label>
+        <input id="snap" type="range" min="0" max="15">
+        <div class="checks">
+          <label><input type="checkbox" id="circles" checked> Detectar círculos y arcos</label>
+          <label><input type="checkbox" id="rects" checked> Detectar rectángulos</label>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <h2>Escala</h2>
+      <div class="scale">
+        <label for="unit">Unidad</label>
+        <select id="unit">
+          <option value="mm">mm</option>
+          <option value="cm">cm</option>
+          <option value="m">m</option>
+          <option value="px">px</option>
+        </select>
+      </div>
+      <div class="scale">
+        <label for="ref">Referencia</label>
+        <select id="ref">
+          <option value="diam">Ø del orificio</option>
+          <option value="pitch">Paso del patrón</option>
+          <option value="points">2 puntos en la imagen</option>
+        </select>
+      </div>
+      <div class="inline">
+        <input id="refVal" type="number" min="0" step="any" inputmode="decimal" placeholder="Valor real" aria-label="Valor real">
+        <span id="refUnit">mm</span>
+        <button class="btn primary" type="button" id="btnApplyCalib">Aplicar</button>
+      </div>
+      <p class="hint" id="scaleInfo">Sin calibrar: las medidas están en píxeles.</p>
+    </section>
+
+    <section>
+      <h2>Imagen y vista</h2>
+      <label class="row" for="res"><span>Resolución de trabajo</span><output id="o-res"></output></label>
+      <input id="res" type="range" min="400" max="2400" step="100">
+      <label class="row" for="bg"><span>Imagen de fondo</span><output id="o-bg"></output></label>
+      <input id="bg" type="range" min="0" max="100">
+      <label class="row" for="lw"><span>Grosor de línea</span><output id="o-lw"></output></label>
+      <input id="lw" type="range" min="5" max="60">
+      <div class="checks">
+        <label><input type="checkbox" id="labels"> Mostrar medidas / números</label>
+        <label><input type="checkbox" id="colors" checked> Color por tipo</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Exportar</h2>
+      <div class="grid2">
+        <button class="btn" type="button" data-exp="csv">CSV (Excel)</button>
+        <button class="btn" type="button" data-exp="png">PNG</button>
+        <button class="btn" type="button" data-exp="dxf">DXF</button>
+        <button class="btn" type="button" data-exp="svg">SVG</button>
+        <button class="btn" type="button" data-exp="json">JSON</button>
+      </div>
+    </section>
+  </aside>
 </main>
 
 <script src="core.js"></script>

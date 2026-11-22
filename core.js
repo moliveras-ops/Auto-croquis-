@@ -463,6 +463,7 @@
     // supresión de solapes
     const cs = rmax * 2.4, grid = new Map(), kept = [];
     for (const c of pick) {
+      if (!inRoi(o.roi, c.x, c.y)) continue;
       const gx = (c.x / cs) | 0, gy = (c.y / cs) | 0;
       let clash = false;
       for (let dy = -1; dy <= 1 && !clash; dy++) for (let dx = -1; dx <= 1 && !clash; dx++) {
@@ -553,24 +554,72 @@
 
     function finish(list, pat, pitchV, th) {
       const shapes = list.map((h) => ({ type: 'circle', cx: h.x, cy: h.y, r: h.r, length: 2 * PI * h.r, row: 0, col: 0 }));
-      let rows = 0;
-      if (pat && shapes.length) {
-        const rowSp = pat.hex ? pitchV * Math.sin(PI / 3) : pitchV, c = Math.cos(th), sn = Math.sin(th);
-        shapes.forEach((s) => { s.v = -s.cx * sn + s.cy * c; s.u = s.cx * c + s.cy * sn; });
-        shapes.sort((a, b) => a.v - b.v);
-        let row = 1, prev = shapes[0].v, cur = [];
-        const flush = () => { cur.sort((a, b) => a.u - b.u).forEach((s, k) => { s.row = row; s.col = k + 1; }); cur = []; };
-        for (const s of shapes) { if (s.v - prev > rowSp * 0.5) { flush(); row++; } cur.push(s); prev = s.v; }
-        flush(); rows = row;
-        shapes.sort((a, b) => a.row - b.row || a.col - b.col);
-      }
-      shapes.forEach((s, i) => { s.id = i; delete s.u; delete s.v; });
-      const stats = { count: shapes.length, diam: 2 * median(shapes.map((s) => s.r)), pitch: pitchV, rows, hex: pat ? pat.hex : null, angle: pat ? th * 180 / PI : 0 };
+      const stats = { count: shapes.length, diam: 2 * median(shapes.map((s) => s.r)), pitch: pitchV, rows: 0, hex: pat ? pat.hex : null, angle: pat ? th * 180 / PI : 0 };
+      stats.rows = numberGrid(shapes, stats);
+      shapes.forEach((s, i) => { s.id = i; });
       return { shapes, stats };
     }
   }
 
-  const api = { holes, analyze, canny, trace, classify, fitCircle, simplify, pathLen };
+  function inRoi(roi, x, y) {
+    if (!roi) return true;
+    if (roi.ellipse) {
+      const cx = (roi.x0 + roi.x1) / 2, cy = (roi.y0 + roi.y1) / 2, rx = (roi.x1 - roi.x0) / 2, ry = (roi.y1 - roi.y0) / 2;
+      return ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
+    }
+    return x >= roi.x0 && x <= roi.x1 && y >= roi.y0 && y <= roi.y1;
+  }
+
+  /* Numera por fila y columna según la orientación del patrón. Ordena la lista en sitio. */
+  function numberGrid(list, st) {
+    if (!st || !st.pitch || !list.length) { list.forEach((s) => { s.row = 0; s.col = 0; }); return 0; }
+    const th = st.angle * PI / 180, rowSp = st.hex ? st.pitch * Math.sin(PI / 3) : st.pitch;
+    const c = Math.cos(th), sn = Math.sin(th);
+    list.forEach((s) => { s._v = -s.cx * sn + s.cy * c; s._u = s.cx * c + s.cy * sn; });
+    list.sort((a, b) => a._v - b._v);
+    let row = 1, prev = list[0]._v, cur = [];
+    const flush = () => { cur.sort((a, b) => a._u - b._u).forEach((s, k) => { s.row = row; s.col = k + 1; }); cur = []; };
+    for (const s of list) { if (s._v - prev > rowSp * 0.5) { flush(); row++; } cur.push(s); prev = s._v; }
+    flush();
+    list.sort((a, b) => a.row - b.row || a.col - b.col);
+    list.forEach((s) => { delete s._u; delete s._v; });
+    return row;
+  }
+
+  /* Posiciones del patrón sin orificio detectado, rodeadas por orificios (tubos taponados, ocultos o no detectados). */
+  function missing(shapes, st, roi) {
+    if (!st || !st.pitch || shapes.length < 6) return [];
+    const p = st.pitch, m = st.hex ? 6 : 4, th = st.angle * PI / 180, need = st.hex ? 5 : 4;
+    const vecs = [];
+    for (let k = 0; k < m; k++) { const a = th + k * 2 * PI / m; vecs.push([p * Math.cos(a), p * Math.sin(a)]); }
+    const grid = new Map(), key = (x, y) => ((x / p) | 0) + ',' + ((y / p) | 0);
+    const add = (q) => { const k = key(q[0], q[1]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(q); };
+    const around = (x, y, lo, hi) => {
+      let n = 0; const gx = (x / p) | 0, gy = (y / p) | 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const l = grid.get((gx + dx) + ',' + (gy + dy));
+        if (l) for (const q of l) { const d = Math.hypot(q[0] - x, q[1] - y); if (d >= lo && d <= hi) n++; }
+      }
+      return n;
+    };
+    const pts = shapes.map((s) => [s.cx, s.cy]); pts.forEach(add);
+    const found = [];
+    for (let it = 0; it < 4; it++) {
+      const cand = [];
+      for (const q of pts) for (const v of vecs) {
+        const x = q[0] + v[0], y = q[1] + v[1];
+        if (!inRoi(roi, x, y)) continue;
+        if (around(x, y, 0, 0.45 * p)) continue;
+        if (cand.some((c) => Math.hypot(c[0] - x, c[1] - y) < 0.45 * p)) continue;
+        if (around(x, y, 0.75 * p, 1.25 * p) >= need) cand.push([x, y]);
+      }
+      if (!cand.length) break;
+      cand.forEach((c) => { found.push(c); pts.push(c); add(c); });
+    }
+    return found.map((c) => ({ cx: c[0], cy: c[1] }));
+  }
+
+  const api = { holes, missing, numberGrid, inRoi, analyze, canny, trace, classify, fitCircle, simplify, pathLen };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Croquis = api;
 })(typeof self !== 'undefined' ? self : this);
